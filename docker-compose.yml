@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    environment:
+      - POSTGRES_URL=postgresql://user:pass@db_postgres:5432/caps
+      - MONGO_URL=mongodb://db_mongo:27017/caps
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      - db_postgres
+      - db_mongo
+      - redis
+      - rabbitmq
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: [ "python", "worker.py" ]
+    environment:
+      - MONGO_URL=mongodb://db_mongo:27017/caps
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - POSTGRES_URL=postgresql://user:pass@db_postgres:5432/caps
+    depends_on:
+      - db_mongo
+      - db_postgres
+      - rabbitmq
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+  db_postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=pass
+      - POSTGRES_DB=caps
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  db_mongo:
+    image: mongo:6
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=user
+      - RABBITMQ_DEFAULT_PASS=password
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "check_running" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  flink_jobmanager:
+    image: flink:latest
+    ports:
+      - "8081:8081"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink_jobmanager
+
+  flink_taskmanager:
+    image: flink:latest
+    depends_on:
+      - flink_jobmanager
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink_jobmanager
+        taskmanager.numberOfTaskSlots: 2
+
+volumes:
+  postgres_data:
+  mongo_data:
