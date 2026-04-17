@@ -102,6 +102,25 @@ async def get_results():
         print(f"Error fetching results: {e}")
         return []
 
+@app.get("/api/alerts")
+async def get_alerts():
+    try:
+        conn = psycopg2.connect(POSTGRES_URL)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        # 분석 결과에서 알림 목록만 추출
+        cur.execute("SELECT analysis_data->'alerts' as alerts FROM analysis_results WHERE analysis_data->'alerts' IS NOT NULL ORDER BY created_at DESC LIMIT 20")
+        rows = cur.fetchall()
+        alerts = []
+        for row in rows:
+            if row['alerts']:
+                alerts.extend(row['alerts'])
+        cur.close()
+        conn.close()
+        return alerts
+    except Exception as e:
+        print(f"Error fetching alerts: {e}")
+        return []
+
 @app.get("/api/devices", response_model=List[Device])
 async def get_devices():
     locations = ["강남역 1번 출구", "홍대입구역 9번 출구", "광화문 광장", "잠실역 사거리"]

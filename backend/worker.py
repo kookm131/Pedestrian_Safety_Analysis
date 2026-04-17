@@ -161,7 +161,7 @@ def process_video(file_id, filename):
             # 3. 비식별화 적용
             frame = privacy_engine.apply(frame, detections)
             
-            # 4. 프레임 쓰기
+        # 4. 프레임 쓰기
             out.write(frame)
             frame_count += 1
             if frame_count % 30 == 0:
@@ -170,14 +170,31 @@ def process_video(file_id, filename):
         cap.release()
         out.release()
         
-        # 5. 처리된 영상 MongoDB에 저장
+        # 5. 밀집도 기반 위험 지수 계산 (Phase 2)
+        total_people = object_counts.get('person', 0)
+        avg_people_per_frame = total_people / frame_count if frame_count > 0 else 0
+        risk_score = min(avg_people_per_frame / 20.0, 1.0) # 20명 이상일 때 위험도 1.0
+        
+        # 위험 알림 생성
+        alerts = []
+        if risk_score > 0.7:
+             alerts.append({
+                 "type": "crowd_density",
+                 "level": "CRITICAL" if risk_score > 0.9 else "WARNING",
+                 "message": f"밀집 인파 위험 감지: 평균 {avg_people_per_frame:.1f}명",
+                 "timestamp": datetime.datetime.now().isoformat()
+             })
+
+        # 6. 처리된 영상 MongoDB에 저장
         with open(temp_output, 'rb') as f:
             processed_file_id = fs.put(f, filename=f"processed_{filename}", content_type="video/mp4")
         
-        # 6. PostgreSQL에 결과 및 처리된 파일 ID 저장
+        # 7. PostgreSQL에 결과 및 처리된 파일 ID 저장
         summary = {
             "total_frames": frame_count,
             "counts": object_counts,
+            "risk_score": risk_score,
+            "alerts": alerts,
             "status": "completed"
         }
         
