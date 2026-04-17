@@ -6,10 +6,10 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - POSTGRES_URL=postgresql://user:pass@db_postgres:5432/caps
-      - MONGO_URL=mongodb://db_mongo:27017/caps
-      - REDIS_URL=redis://redis:6379/0
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - POSTGRES_URL=${POSTGRES_URL}
+      - MONGO_URL=${MONGO_URL}
+      - REDIS_URL=${REDIS_URL}
+      - RABBITMQ_URL=${RABBITMQ_URL}
     depends_on:
       - db_postgres
       - db_mongo
@@ -22,9 +22,9 @@ services:
       dockerfile: Dockerfile
     command: [ "python", "worker.py" ]
     environment:
-      - MONGO_URL=mongodb://db_mongo:27017/caps
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-      - POSTGRES_URL=postgresql://user:pass@db_postgres:5432/caps
+      - MONGO_URL=${MONGO_URL}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - POSTGRES_URL=${POSTGRES_URL}
     depends_on:
       - db_mongo
       - db_postgres
@@ -42,9 +42,9 @@ services:
   db_postgres:
     image: postgres:15
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=pass
-      - POSTGRES_DB=caps
+      - POSTGRES_USER=${POSTGRES_USER:-user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-caps}
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -64,8 +64,8 @@ services:
       - "5672:5672"
       - "15672:15672"
     environment:
-      - RABBITMQ_DEFAULT_USER=user
-      - RABBITMQ_DEFAULT_PASS=password
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-guest}
     healthcheck:
       test: [ "CMD", "rabbitmq-diagnostics", "-q", "check_running" ]
       interval: 10s

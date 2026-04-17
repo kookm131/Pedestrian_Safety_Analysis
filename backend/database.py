@@ -12,10 +12,10 @@ import redis
 import json
 
 # --- 환경 변수 관리 ---
-POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://user:pass@db_postgres:5432/caps")
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://db_mongo:27017/caps")
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://user:password@rabbitmq:5672/")
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://user:password@localhost:5432/caps")
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/caps")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # --- Redis 설정 ---
 redis_client = redis.from_url(REDIS_URL, decode_responses=True)
