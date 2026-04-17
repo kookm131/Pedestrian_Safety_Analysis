@@ -19,6 +19,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Zero Trust Security: JWT Auth Middleware
+from fastapi import Request
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # 공개 API 제외 (데모 목적상 현재는 패스)
+    if request.url.path in ["/api/status", "/docs", "/openapi.json"]:
+        return await call_next(request)
+        
+    # auth_token 확인 (데모용 헤더 로닉)
+    # 실제로는 Identity Provider(Keycloak, Google Auth 등) 연동 권장
+    auth_header = request.headers.get("Authorization")
+    if not auth_header and os.getenv("STRICT_AUTH", "false") == "true":
+         raise HTTPException(status_code=401, detail="Unauthorized")
+         
+    return await call_next(request)
+
 # Configuration from environment variables
 MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/caps")
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
@@ -89,11 +105,25 @@ from psycopg2.extras import RealDictCursor
 POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://user:pass@localhost:5432/caps")
 
 @app.get("/api/results")
-async def get_results():
+async def get_results(filename: str = None, start_date: str = None):
     try:
         conn = psycopg2.connect(POSTGRES_URL)
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM analysis_results ORDER BY created_at DESC")
+        
+        query = "SELECT * FROM analysis_results WHERE 1=1"
+        params = []
+        
+        if filename:
+            query += " AND filename ILIKE %s"
+            params.append(f"%{filename}%")
+        
+        if start_date:
+            query += " AND created_at >= %s"
+            params.append(start_date)
+            
+        query += " ORDER BY created_at DESC"
+        
+        cur.execute(query, params)
         results = cur.fetchall()
         cur.close()
         conn.close()
