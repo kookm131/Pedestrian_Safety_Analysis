@@ -29,6 +29,17 @@ class PrivacyEngine:
                     frame[y1:y2, x1:x2] = cv2.resize(temp, (w, h), interpolation=cv2.NEAREST)
         return frame
 
+class ContextEngine:
+    """기상 정보 및 외부 교통 데이터를 결합하는 멀티모달 엔진"""
+    def get_environmental_context(self):
+        # 실제 운영 환경에서는 기상청 API 등을 연동하지만, 여기서는 시뮬레이션 데이터를 반환합니다.
+        contexts = [
+            {"weather": "Clear", "temp": 22, "road_condition": "Dry", "risk_multiplier": 1.0},
+            {"weather": "Rainy", "temp": 18, "road_condition": "Wet", "risk_multiplier": 1.3},
+            {"weather": "Snowy", "temp": -2, "road_condition": "Icy", "risk_multiplier": 1.5}
+        ]
+        return np.random.choice(contexts)
+
 class AIEngine:
     def __init__(self):
         model_path = "yolo11n.pt"
@@ -43,18 +54,25 @@ class AIEngine:
     def detect(self, frame):
         results = self.model(frame, verbose=False)[0]
         detections = []
+        uncertain_detections = []
         for box in results.boxes:
             label = self.model.names[int(box.cls[0])]
             confidence = float(box.conf[0])
             bbox = box.xyxy[0].tolist()
             if confidence > 0.4:
                 detections.append({"label": label, "confidence": confidence, "bbox": bbox})
-        return detections
+            
+            # Active Learning: 신뢰도가 낮은(0.4~0.6) 탐지는 별도 플래그 (재학습용)
+            if 0.4 <= confidence <= 0.6:
+                uncertain_detections.append({"label": label, "confidence": confidence, "bbox": bbox})
+                
+        return detections, uncertain_detections
 
 # 싱글톤 엔진 초기화
 print("[*] Initializing AI Engines...")
 ai_engine = AIEngine()
 privacy_engine = PrivacyEngine(mode="blur")
+context_engine = ContextEngine()
 
 def process_video(file_id, filename):
     print(f"[*] Processing video: {filename} ({file_id})")
@@ -76,14 +94,23 @@ def process_video(file_id, filename):
         
         object_counts = {}
         frame_count = 0
+        active_learning_pool = [] # 재학습 대상 데이터 인덱스
+        
+        # 멀티모달 컨텍스트 획득
+        env_context = context_engine.get_environmental_context()
         
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret: break
-            detections = ai_engine.detect(frame)
+            detections, uncertains = ai_engine.detect(frame)
             for det in detections:
                 label = det['label']
                 object_counts[label] = object_counts.get(label, 0) + 1
+            
+            # 액티브 러닝 샘플링 (불확실한 프레임 기록)
+            if len(uncertains) > 0 and len(active_learning_pool) < 10:
+                active_learning_pool.append({"frame_idx": frame_count, "uncertains": uncertains})
+            
             frame = privacy_engine.apply(frame, detections)
             out.write(frame)
             frame_count += 1
@@ -94,10 +121,20 @@ def process_video(file_id, filename):
         
         total_people = object_counts.get('person', 0)
         avg_people = total_people / frame_count if frame_count > 0 else 0
-        risk_score = min(avg_people / 20.0, 1.0)
+        
+        # 멀티모달 기반 가중치 적용 위험 지수 산출
+        density_score = min(avg_people / 20.0, 1.0)
+        weather_multiplier = env_context.get('risk_multiplier', 1.0)
+        risk_score = min(density_score * weather_multiplier, 1.0)
+        
         alerts = []
         if risk_score > 0.7:
-             alerts.append({"type": "crowd_density", "level": "WARNING" if risk_score < 0.9 else "CRITICAL", "message": f"위험 밀집 발생 ({avg_people:.1f}명)", "timestamp": datetime.datetime.now().isoformat()})
+             alerts.append({
+                 "type": "multi_modal_danger", 
+                 "level": "WARNING" if risk_score < 0.9 else "CRITICAL", 
+                 "message": f"위험 감지 (인파밀집: {avg_people:.1f}명, 환경: {env_context['weather']})", 
+                 "timestamp": datetime.datetime.now().isoformat()
+             })
 
         with open(temp_output, 'rb') as f:
             processed_file_id = fs.put(f, filename=f"processed_{filename}", content_type="video/mp4")
@@ -107,7 +144,14 @@ def process_video(file_id, filename):
         result_record = AnalysisResult(
             file_id=file_id,
             filename=filename,
-            analysis_data={"total_frames": frame_count, "counts": object_counts, "risk_score": risk_score, "alerts": alerts},
+            analysis_data={
+                "total_frames": frame_count, 
+                "counts": object_counts, 
+                "risk_score": risk_score, 
+                "alerts": alerts,
+                "multi_modal_context": env_context,
+                "active_learning_candidates": len(active_learning_pool)
+            },
             processed_file_id=str(processed_file_id)
         )
         db.add(result_record)

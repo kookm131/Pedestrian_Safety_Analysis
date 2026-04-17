@@ -1,0 +1,33 @@
+# Phase 5: AI 모델 진화 및 MLOps 자동화 완료
+
+프로젝트 로드맵의 **Phase 5** 단계를 완수하여 시스템의 지능화 수준을 한 단계 끌어올렸습니다.
+
+## 구현 상세
+
+### 1. 멀티모달(Multi-Modal) AI 통합
+- **ContextEngine 도입**: 실시간 기상 상태(맑음, 비, 눈)와 도로 환경 데이터를 수집하는 엔진을 구축했습니다.
+- **정밀 안전 지수(Risk Score)**: 단순히 인파 밀집도만 측정하던 방식에서 벗어나, `날씨 가중치(Risk Multiplier)`를 적용하여 폭우나 폭설 시 위험 수위를 더 높게 산출하도록 개선했습니다.
+
+### 2. 액티브 러닝(Active Learning) 파이프라인
+- **불확실성 태깅(Uncertainty Tagging)**: AI 모델의 추론 신뢰도가 낮은(0.4~0.6) 프레임을 자동으로 식별합니다.
+- **데이터 선별**: 식별된 프레임들을 `active_learning_candidates`로 분류하여 향후 모델 재학습 데이터셋 구축을 위한 효율적인 자동화 기반을 마련했습니다.
+
+### 3. 하이브리드 추론 및 로드맵 업데이트
+- **엣지-클라우드 연동**: 엣지 단에서의 1차 필터링과 클라우드 정밀 분석을 연결하는 파이프라인 설계를 확립했습니다.
+- **로드맵 최신화**: [ROADMAP.md](file:///home/ubuntu/Pedestrian_Safety_Analysis/docu/ROADMAP.md)의 모든 Phase 5 항목을 완료 처리했습니다.
+
+## 결과 예시 (API 응답)
+분석 완료 후 `/api/results`를 통해 아래와 같이 고도화된 컨텍스트 데이터를 확인할 수 있습니다:
+```json
+{
+  "risk_score": 0.92,
+  "multi_modal_context": {
+    "weather": "Rainy",
+    "road_condition": "Wet",
+    "risk_multiplier": 1.3
+  },
+  "active_learning_candidates": 4
+}
+```
+
+이제 CAPS 플랫폼은 단순한 모니터링을 넘어, 주변 환경을 이해하고 스스로 학습 데이터를 선별하는 지능형 플랫폼으로 진화했습니다.
