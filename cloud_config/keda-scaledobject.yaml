@@ -1,0 +1,16 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: caps-worker-scaler
+  namespace: caps
+spec:
+  scaleTargetRef:
+    name: caps-worker
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: rabbitmq
+    metadata:
+      queueName: video_analysis_task
+      queueLength: "5" # 5개 이상의 작업이 쌓이면 복제본 확장
+      host: RABBITMQ_HOST # 환경변수 또는 Secret에서 참조
