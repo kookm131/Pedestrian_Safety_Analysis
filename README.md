@@ -12,6 +12,107 @@
 - **통합 모니터링 대시보드**: 객체별 통계, 서버 상태, 오토스케일링 현황 시각화
 - **이벤트 기반 확장성**: RabbitMQ와 KEDA를 활용한 트래픽 기반 GPU 자원 자동 확장 (Autoscaling)
 
+## 📄 제품 요구사항 정의 (PRD)
+
+### 핵심 가치
+최신 AI 기술과 클라우드 인프라를 결합하여 복잡한 도심 환경에서의 **보행자 안전을 실시간으로 확보**하고 사고를 예방하는 지능형 관제 솔루션을 지향합니다.
+
+### 주요 기능 요건
+1.  **실시간 정밀 탐지**: YOLOv11 기반 고속 객체 탐지 및 밀집도 분석
+2.  **개인정보 비식별화**: 탐지 객체(안면, 번호판)에 대한 실시간 가명처리(Blur/Masking)
+3.  **지능형 알림**: 밀집도 임계치 초과 시 즉각적인 위험 이벤트 생성 및 전송
+4.  **클라우드 최적화**: KEDA를 통한 워크로드 기반 GPU 오토스케일링
+
+## 🏗 시스템 아키텍처 (System Architecture)
+
+본 플랫폼은 고가용성과 실시간 처리를 위해 **이벤트 기반 마이크로서비스 아키텍처(EDA)**를 채택하고 있습니다.
+
+```mermaid
+graph TD
+    subgraph "Client Layer"
+        UI[React Dashboard]
+        Mob[Mobile App]
+    end
+
+    subgraph "API & Ingestion Layer"
+        API[FastAPI Backend]
+    end
+
+    subgraph "Messaging & Cache"
+        RMQ[RabbitMQ]
+        Redis[(Redis)]
+    end
+
+    subgraph "AI Inference Layer (KEDA Autoscaling)"
+        Worker[AI Analysis Worker]
+        YOLO[YOLOv11 Engine]
+    end
+
+    subgraph "Data Storage Layer"
+        PSQL[(PostgreSQL)]
+        MongoDB[(MongoDB GridFS)]
+        GCS[Cloud Storage]
+    end
+
+    UI & Mob <--> API
+    API -->|1. Upload Video| MongoDB
+    API -->|2. Publish Task| RMQ
+    RMQ -->|3. Consume| Worker
+    Worker -->|4. Read Video| MongoDB
+    Worker -->|5. Inference| YOLO
+    Worker -->|6. Save Results| PSQL
+    Worker -->|7. Update Real-time| Redis
+    Worker -->|8. Save Processed| MongoDB
+    API -->|Fetch Status| Redis
+    API -->|Fetch History| PSQL
+```
+
+## 📊 데이터베이스 설계 (ERD)
+
+시스템의 정합성 유지와 대규모 분석 로그 관리를 위한 관계형 데이터 설계 모델입니다.
+
+```mermaid
+erDiagram
+    DEVICE ||--o{ VIDEO_STREAM : "provides"
+    VIDEO_STREAM ||--o{ DETECTION_LOG : "has"
+    DETECTION_LOG ||--o{ DETECTED_OBJECT : "contains"
+    DETECTION_LOG ||--o| ALERT_EVENT : "triggers"
+
+    DEVICE {
+        string device_id PK
+        string location
+        string status
+        string ip_address
+    }
+    VIDEO_STREAM {
+        string video_id PK
+        string device_id FK
+        datetime start_time
+        string storage_path
+    }
+    DETECTION_LOG {
+        string log_id PK
+        string video_id FK
+        datetime timestamp
+        int object_count
+        float density_score
+    }
+    DETECTED_OBJECT {
+        string obj_id PK
+        string log_id FK
+        string class_type
+        float confidence
+        json bbox_data
+    }
+    ALERT_EVENT {
+        string event_id PK
+        string log_id FK
+        string event_type
+        boolean is_confirmed
+    }
+```
+
+
 ## 🛠 시스템 구성 및 기술 스택
 - **Frontend**: React, Vite, D3.js, Plotly, Tailwind CSS
 - **Backend**: FastAPI (Python)
