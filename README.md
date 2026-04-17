@@ -14,6 +14,10 @@
 - **Open API 게이트웨이**: 외부 긴급구조 시스템(119 등) 연동을 위한 전용 API (v1) 제공
 - **V2X 차량 연동**: 자율주행 차량을 위한 PSM 표준 규격 메시지 실시간 송출
 - **멀티테넌트 지원**: 기관별 독립적인 데이터 관리 및 필터링 체계 구축
+- **보안 및 개인정보 보호**: 실시간 비식별화 기술 및 엄격한 환경변수 기반 설정 관리
+- **Open API 게이트웨이**: 외부 긴급구조 시스템(119 등) 연동을 위한 전용 API (v1) 제공
+- **V2X 차량 연동**: 자율주행 차량을 위한 PSM 표준 규격 메시지 실시간 송출
+- **멀티테넌트 지원**: 기관별 독립적인 데이터 관리 및 필터링 체계 구축
 
 ## 📄 제품 요구사항 정의 (PRD)
 
@@ -146,20 +150,25 @@ erDiagram
 - [**화면 설계서 (UI Design)**](docu/ui_design_1.md): 대시보드 및 모바일 UI 구성 설명
 - [**구현 계획 (Implementation)**](docu/implementation_plan.md): 아키텍처 및 상세 구현 로드맵
 
-## ⚙️ 실행 방법
+## 🚀 시작하기 (How to Run)
 
-### 사전 요구 사항
+### 1. 사전 준비 (Prerequisites)
 - Docker 및 Docker Compose
+- **환경 변수 설정**: 보안과 유연한 설정을 위해 `.env` 파일을 사용합니다.
+  - 제공된 `.env.example` 파일을 `.env`로 복사합니다.
+  - `.env` 파일 내 각 항목(DB URL, MQ URL 등)을 사용자 환경에 맞게 수정합니다.
+  ```bash
+  cp .env.example .env
+  ```
 
-### 서비스 시작
-루트 디렉토리에서 아래 명령어를 실행하세요:
-
+### 2. 서비스 실행
+루트 디렉토리에서 아래 명령어를 실행하여 전체 시스템(DB, MQ, Backend, Frontend)을 구동합니다:
 ```bash
 docker-compose up --build
 ```
 
-### 접속 정보
-- **Frontend**: [http://localhost:5173](http://localhost:5173)
+### 3. 접속 정보
+- **Frontend (대시보드)**: [http://localhost:5173](http://localhost:5173)
 - **Backend API**: [http://localhost:5000](http://localhost:5000)
-- **RabbitMQ 관리 UI**: [http://localhost:15672](http://localhost:15672) (guest/guest)
+- **RabbitMQ 관리 UI**: [http://localhost:15672](http://localhost:15672) (ID: guest / PW: guest)
 - **Flink Dashboard**: [http://localhost:8081](http://localhost:8081)
