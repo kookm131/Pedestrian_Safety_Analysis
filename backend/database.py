@@ -43,6 +43,7 @@ class AnalysisResult(Base):
     __tablename__ = "analysis_results"
     
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String(50), default="default", index=True) # 멀티테넌트 식별자
     file_id = Column(String(50), nullable=False)
     filename = Column(String(255), nullable=False)
     analysis_data = Column(JSON)

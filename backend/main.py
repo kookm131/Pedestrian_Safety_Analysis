@@ -70,17 +70,16 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/results")
-async def get_results(filename: str = None, start_date: str = None):
-    # 필터가 없을 때만 캐시 적용
-    cache_key = "all_results_latest"
-    if not filename and not start_date:
-        cached_data = cache_get(cache_key)
-        if cached_data:
-            return cached_data
+async def get_results(filename: str = None, start_date: str = None, tenant_id: str = "default"):
+    # 멀티테넌트 필터링 적용
+    cache_key = f"results_{tenant_id}_{filename}_{start_date}"
+    cached_data = cache_get(cache_key)
+    if cached_data:
+        return cached_data
 
     try:
         db = SessionLocal()
-        query = db.query(AnalysisResult)
+        query = db.query(AnalysisResult).filter(AnalysisResult.tenant_id == tenant_id)
         
         if filename:
             query = query.filter(AnalysisResult.filename.ilike(f"%{filename}%"))
@@ -98,6 +97,7 @@ async def get_results(filename: str = None, start_date: str = None):
         data = [
             {
                 "id": r.id,
+                "tenant_id": r.tenant_id,
                 "file_id": r.file_id,
                 "filename": r.filename,
                 "analysis_data": r.analysis_data,
@@ -106,10 +106,7 @@ async def get_results(filename: str = None, start_date: str = None):
             } for r in results
         ]
         
-        # 필터 없을 때 캐시 저장
-        if not filename and not start_date:
-            cache_set(cache_key, data, expire=120) # 2분 캐시
-            
+        cache_set(cache_key, data, expire=120)
         return data
     except Exception as e:
         print(f"Error fetching results: {e}")
@@ -119,7 +116,6 @@ async def get_results(filename: str = None, start_date: str = None):
 async def get_alerts():
     try:
         db = SessionLocal()
-        # JSON 컬럼 내의 alerts 추출 (PostgreSQL 기능 활용)
         results = db.query(AnalysisResult).filter(AnalysisResult.analysis_data['alerts'].isnot(None)).order_by(AnalysisResult.created_at.desc()).limit(20).all()
         alerts = []
         for r in results:
@@ -143,6 +139,61 @@ async def get_devices():
         ) for i in range(1, 6)
     ]
 
+# --- Phase 6: Ecosystem Expansion Endpoints ---
+
+@app.get("/api/v1/external/events")
+async def get_external_events(api_key: str):
+    """외부 긴급구조 시스템(119, 경찰)을 위한 공개 API"""
+    # 심플 API 키 검증 (데모용)
+    if api_key != os.getenv("EXTERNAL_API_KEY", "caps-public-key"):
+        raise HTTPException(status_code=403, detail="Invalid API Key")
+    
+    db = SessionLocal()
+    # 최근 1시간 내의 CRITICAL 알람만 필터링하여 제공
+    one_hour_ago = datetime.datetime.utcnow() - datetime.timedelta(hours=1)
+    results = db.query(AnalysisResult).filter(
+        AnalysisResult.created_at >= one_hour_ago
+    ).all()
+    
+    external_events = []
+    for r in results:
+        if r.analysis_data and 'alerts' in r.analysis_data:
+            for alert in r.analysis_data['alerts']:
+                if alert['level'] == "CRITICAL":
+                    external_events.append({
+                        "event_id": f"EXT-{r.id}",
+                        "location": "Registered Camera Location",
+                        "severity": "HIGH",
+                        "message": alert['message'],
+                        "detected_at": r.created_at.isoformat()
+                    })
+    db.close()
+    return external_events
+
+@app.get("/api/v1/v2x/messages")
+async def get_v2x_messages():
+    """자율주행 차량을 위한 V2X 표준 규격(PSM 기반) 메시지 송출"""
+    db = SessionLocal()
+    # 최신 분석 결과 중 보행자 탐지 정보만 추출하여 V2X 포맷으로 변환
+    latest = db.query(AnalysisResult).order_by(AnalysisResult.created_at.desc()).first()
+    db.close()
+    
+    if not latest or not latest.analysis_data:
+        return {"status": "no_active_hazards"}
+
+    # V2X PSM (Personal Safety Message) 시뮬레이션
+    v2x_msg = {
+        "msgType": "PSM",
+        "msgCnt": random.randint(0, 127),
+        "id": latest.file_id[:8],
+        "secMark": int(time.time() * 1000) % 65535,
+        "position": {"lat": 37.5665, "long": 126.9780}, # 고정된 위치 시뮬레이션
+        "event": latest.analysis_data.get("alerts", []),
+        "description": f"Pedestrians detected: {latest.analysis_data.get('counts', {}).get('person', 0)}"
+    }
+    return v2x_msg
+
 if __name__ == "__main__":
     import uvicorn
+    import time # V2X 메시지 시간 계산용
     uvicorn.run(app, host="0.0.0.0", port=5000)
