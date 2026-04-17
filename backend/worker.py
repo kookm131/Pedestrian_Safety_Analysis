@@ -3,20 +3,10 @@ import json
 import os
 import time
 import datetime
-import random
 import cv2
 import numpy as np
-from pymongo import MongoClient
-import gridfs
+from database import mongo_db, fs, RABBITMQ_URL, SessionLocal, AnalysisResult, init_postgres, cache_set
 from ultralytics import YOLO
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from io import BytesIO
-
-# Configuration from environment variables
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/caps")
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
-POSTGRES_URL = os.getenv("POSTGRES_URL", "postgresql://user:pass@localhost:5432/caps")
 
 class PrivacyEngine:
     """개인정보 보호를 위한 비식별화(모자이크/블러) 엔진"""
@@ -24,46 +14,31 @@ class PrivacyEngine:
         self.mode = mode
 
     def apply(self, frame, detections):
-        """
-        탐지된 객체(안면, 번호판 등)에 대해 비식별화 적용
-        현재는 YOLO 탐지 결과의 class_id나 label을 기반으로 처리
-        """
         for det in detections:
-            # 0: person, 2: car 등 (COCO dataset 기준)
-            # 실제 PRD에서는 안면(Face)과 번호판(License Plate) 전용 모델 사용 권장
             if det['label'] in ['person', 'face', 'license-plate']:
                 x1, y1, x2, y2 = map(int, det['bbox'])
-                
-                # 경계 검사
                 x1, y1 = max(0, x1), max(0, y1)
                 x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
-                
                 roi = frame[y1:y2, x1:x2]
                 if self.mode == "blur":
-                    # 블러 처리
                     blurred_roi = cv2.GaussianBlur(roi, (51, 51), 30)
                     frame[y1:y2, x1:x2] = blurred_roi
                 else:
-                    # 모자이크 처리
                     h, w = roi.shape[:2]
                     temp = cv2.resize(roi, (w//10, h//10), interpolation=cv2.LINEAR)
                     frame[y1:y2, x1:x2] = cv2.resize(temp, (w, h), interpolation=cv2.NEAREST)
         return frame
 
 class AIEngine:
-    """YOLOv11 기반 객체 탐지 및 TensorRT 최적화 구조"""
     def __init__(self):
-        # TensorRT 최적화 모델 유무 확인 (Phase 1 목표)
-        model_path = "yolo11n.pt" # 기본 모델
+        model_path = "yolo11n.pt"
         trt_path = "yolo11n.engine"
-        
         if os.path.exists(trt_path):
             print(f"[*] Loading TensorRT optimized model: {trt_path}")
             self.model = YOLO(trt_path, task='detect')
         else:
             print(f"[*] TensorRT model not found. Using standard model: {model_path}")
             self.model = YOLO(model_path)
-            # self.model.export(format='engine') # TensorRT로 내보내기 시도 가능
 
     def detect(self, frame):
         results = self.model(frame, verbose=False)[0]
@@ -71,153 +46,93 @@ class AIEngine:
         for box in results.boxes:
             label = self.model.names[int(box.cls[0])]
             confidence = float(box.conf[0])
-            bbox = box.xyxy[0].tolist() # [x1, y1, x2, y2]
-            
+            bbox = box.xyxy[0].tolist()
             if confidence > 0.4:
-                detections.append({
-                    "label": label,
-                    "confidence": confidence,
-                    "bbox": bbox
-                })
+                detections.append({"label": label, "confidence": confidence, "bbox": bbox})
         return detections
 
-def get_db_connection():
-    return psycopg2.connect(POSTGRES_URL)
-
-def init_db():
-    print("Initializing PostgreSQL table...")
-    while True:
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS analysis_results (
-                    id SERIAL PRIMARY KEY,
-                    file_id VARCHAR(50) NOT NULL,
-                    filename VARCHAR(255) NOT NULL,
-                    analysis_data JSONB,
-                    processed_file_id VARCHAR(50),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            conn.commit()
-            cur.close()
-            conn.close()
-            print("[*] DB initialized.")
-            break
-        except Exception as e:
-            print(f"[!] DB connection failed, retrying in 2 seconds: {e}")
-            time.sleep(2)
-
-# AI 엔진 및 프라이버시 엔진 초기화
+# 싱글톤 엔진 초기화
 print("[*] Initializing AI Engines...")
 ai_engine = AIEngine()
 privacy_engine = PrivacyEngine(mode="blur")
 
 def process_video(file_id, filename):
     print(f"[*] Processing video: {filename} ({file_id})")
-    
-    mongo_client = MongoClient(MONGO_URL)
-    db = mongo_client.get_database()
-    fs = gridfs.GridFS(db)
-    
     try:
         from bson import ObjectId
         grid_out = fs.get(ObjectId(file_id))
         video_data = grid_out.read()
         
-        # 임시 파일로 저장하여 OpenCV로 읽기
         temp_input = f"temp_in_{file_id}.mp4"
         temp_output = f"temp_out_{file_id}.mp4"
         with open(temp_input, 'wb') as f:
             f.write(video_data)
         
         cap = cv2.VideoCapture(temp_input)
-        fps = cap.get(cv2.CAP_PROP_FPS)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        # 결과 비디오 저장을 위한 설정
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(temp_output, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(temp_output, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
         
         object_counts = {}
         frame_count = 0
         
-        print(f"[*] Starting AI analysis and privacy masking...")
         while cap.isOpened():
             ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # 1. AI 탐지
+            if not ret: break
             detections = ai_engine.detect(frame)
-            
-            # 2. 결과 집계 (프레임별)
             for det in detections:
                 label = det['label']
                 object_counts[label] = object_counts.get(label, 0) + 1
-            
-            # 3. 비식별화 적용
             frame = privacy_engine.apply(frame, detections)
-            
-        # 4. 프레임 쓰기
             out.write(frame)
             frame_count += 1
-            if frame_count % 30 == 0:
-                print(f"[*] Processed {frame_count} frames...")
+            if frame_count % 50 == 0: print(f"[*] Processed {frame_count} frames...")
 
         cap.release()
         out.release()
         
-        # 5. 밀집도 기반 위험 지수 계산 (Phase 2)
         total_people = object_counts.get('person', 0)
-        avg_people_per_frame = total_people / frame_count if frame_count > 0 else 0
-        risk_score = min(avg_people_per_frame / 20.0, 1.0) # 20명 이상일 때 위험도 1.0
-        
-        # 위험 알림 생성
+        avg_people = total_people / frame_count if frame_count > 0 else 0
+        risk_score = min(avg_people / 20.0, 1.0)
         alerts = []
         if risk_score > 0.7:
-             alerts.append({
-                 "type": "crowd_density",
-                 "level": "CRITICAL" if risk_score > 0.9 else "WARNING",
-                 "message": f"밀집 인파 위험 감지: 평균 {avg_people_per_frame:.1f}명",
-                 "timestamp": datetime.datetime.now().isoformat()
-             })
+             alerts.append({"type": "crowd_density", "level": "WARNING" if risk_score < 0.9 else "CRITICAL", "message": f"위험 밀집 발생 ({avg_people:.1f}명)", "timestamp": datetime.datetime.now().isoformat()})
 
-        # 6. 처리된 영상 MongoDB에 저장
         with open(temp_output, 'rb') as f:
             processed_file_id = fs.put(f, filename=f"processed_{filename}", content_type="video/mp4")
         
-        # 7. PostgreSQL에 결과 및 처리된 파일 ID 저장
-        summary = {
-            "total_frames": frame_count,
+        # SQLAlchemy 저장
+        db = SessionLocal()
+        result_record = AnalysisResult(
+            file_id=file_id,
+            filename=filename,
+            analysis_data={"total_frames": frame_count, "counts": object_counts, "risk_score": risk_score, "alerts": alerts},
+            processed_file_id=str(processed_file_id)
+        )
+        db.add(result_record)
+        db.commit()
+        db.close()
+        
+        # Redis 실시간 데이터 업데이트 (Phase 0 / Phase 2 기반)
+        latest_data = {
+            "filename": filename,
             "counts": object_counts,
             "risk_score": risk_score,
-            "alerts": alerts,
-            "status": "completed"
+            "timestamp": datetime.datetime.now().isoformat()
         }
+        cache_set("latest_analytics", latest_data, expire=300)
+        # 결과 목록 캐시 무효화 (다음번 조회 시 DB에서 새로 가져오도록)
+        # 여기서는 단순히 만료시키거나 삭제하는 대신 cache_set으로 덮어씌울 수도 있지만,
+        # 간단하게 만료 시간을 0으로 주어 삭제 효과를 낼 수도 있습니다. (또는 따로 r.delete() 노출 필요)
+        # 현재 cache_set은 ex=expire를 사용하므로 0을 주면 바로 만료될 수 있습니다.
+        cache_set("all_results_latest", None, expire=0)
         
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO analysis_results (file_id, filename, analysis_data, processed_file_id) VALUES (%s, %s, %s, %s)",
-            (file_id, filename, json.dumps(summary), str(processed_file_id))
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        # 임시 파일 삭제
         os.remove(temp_input)
         os.remove(temp_output)
-        
-        print(f"[!] Analysis and masking completed for {filename}")
-        
+        print(f"[!] Analysis completed for {filename}")
     except Exception as e:
-        print(f"[!] Error processing video: {e}")
-    finally:
-        mongo_client.close()
+        print(f"[!] Error: {e}")
 
 def callback(ch, method, properties, body):
     try:
@@ -229,11 +144,9 @@ def callback(ch, method, properties, body):
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 def main():
-    init_db()
-    
+    init_postgres()
     print("[*] Worker starting. Connecting to RabbitMQ...")
     params = pika.URLParameters(RABBITMQ_URL)
-    
     while True:
         try:
             connection = pika.BlockingConnection(params)
@@ -241,11 +154,10 @@ def main():
             channel.queue_declare(queue='video_analysis_task', durable=True)
             channel.basic_qos(prefetch_count=1)
             channel.basic_consume(queue='video_analysis_task', on_message_callback=callback)
-            
-            print("[*] Waiting for messages. To exit press CTRL+C")
+            print("[*] Waiting for messages...")
             channel.start_consuming()
         except Exception as e:
-            print(f"[!] Connection failed, retrying in 5 seconds: {e}")
+            print(f"[!] Retrying in 5s: {e}")
             time.sleep(5)
 
 if __name__ == "__main__":
