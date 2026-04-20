@@ -170,5 +170,12 @@ docker-compose up --build
 ### 3. 접속 정보
 - **Frontend (대시보드)**: [http://localhost:5173](http://localhost:5173)
 - **Backend API**: [http://localhost:5000](http://localhost:5000)
+- **API 문서 (Swagger UI)**: [http://localhost:5000/docs](http://localhost:5000/docs)
 - **RabbitMQ 관리 UI**: [http://localhost:15672](http://localhost:15672) (ID: guest / PW: guest)
 - **Flink Dashboard**: [http://localhost:8081](http://localhost:8081)
+
+## 📖 API 상세 문서
+전체 API 명세는 Swagger(OpenAPI 3.0) 규격을 따르며, 아래 경로에서 확인하실 수 있습니다.
+
+- **실시간 문서**: 서버 구동 후 [http://localhost:5000/docs](http://localhost:5000/docs) 접속
+- **정적 명세 파일**: [docu/swagger.yaml](docu/swagger.yaml)
